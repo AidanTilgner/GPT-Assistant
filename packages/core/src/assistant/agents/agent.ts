@@ -1,6 +1,6 @@
 import { AgentManager } from ".";
 import { Channel, Service } from "..";
-import { DiscreteActionGroup, Module } from "../../types/main";
+import { Module } from "../../types/main";
 import { ChatModel } from "../llm";
 import { randomBytes } from "crypto";
 import { GlobalChannelMessage } from "../../types/main";
@@ -11,7 +11,7 @@ export interface AgentOptions {
   model: ChatModel;
   primaryChannel: Channel;
   primaryConversationId: string;
-  actionGroup: DiscreteActionGroup;
+  task: string;
   verbose?: boolean;
 }
 
@@ -24,12 +24,12 @@ export class Agent {
   private verbose: boolean;
   private agentContext: { [key: string]: string } = {};
   private agentService: Service;
-  private actionGroup: DiscreteActionGroup;
-  private currentAction: number = 0;
+  private task: string;
+  private currentStep: number = 0;
   private userMessages: GlobalChannelMessage[] = [];
   private actionHistory: string[] = [];
   private paused: boolean = false;
-  private done: boolean = false;
+  private complete: boolean = false;
 
   constructor({
     name,
@@ -37,14 +37,14 @@ export class Agent {
     primaryChannel,
     primaryConversationId,
     verbose,
-    actionGroup,
+    task,
   }: AgentOptions) {
     this.name = name;
     this.model = model;
     this.primaryChannel = primaryChannel;
     this.primaryConversationId = primaryConversationId;
+    this.task = task;
     this.verbose = verbose ?? false;
-    this.actionGroup = actionGroup;
     this.agentService = new AgentService({ agent: this });
     this.userMessages = [];
   }
@@ -67,6 +67,14 @@ export class Agent {
 
   public PrimaryChannel(): Channel {
     return this.primaryChannel;
+  }
+
+  public MarkComplete() {
+    this.complete = true;
+  }
+
+  public MarkPaused() {
+    this.paused = true;
   }
 
   public getAgentConversationHistory() {
@@ -166,7 +174,7 @@ export class Agent {
     try {
       await this.sendPrimaryChannelMessage(
         `${this.FormattedAgentName()} has been initialized to complete the following task:
-        "${JSON.stringify(this.actionGroup)}"
+        "${JSON.stringify(this.task)}"
         `,
         "log"
       );
@@ -189,8 +197,16 @@ export class Agent {
     return str;
   }
 
+  public getActionHistoryAsString() {
+    const str = this.actionHistory.reduce((acc, curr) => {
+      return (acc += curr + "\n");
+    }, "");
+
+    return str;
+  }
+
   public finish() {
-    this.done = true;
+    this.complete = true;
     if (this.verbose) {
       this.sendPrimaryChannelMessage(
         `${this.FormattedAgentName()} has finished.`,
@@ -205,41 +221,48 @@ export class Agent {
 
   public async agentProcess(): Promise<boolean> {
     try {
-      if (!this.actionGroup) {
-        console.error("No action group.");
+      if (!this.task) {
+        console.error("No task provided.");
         return false;
+      }
+
+      if (this.complete) {
+        return true;
       }
 
       if (this.paused) {
         return false;
       }
 
-      if (this.done) {
-        return true;
-      }
-
-      if (this.currentAction >= this.actionGroup.actions.length) {
-        this.finish();
-        return true;
-      }
+      console.log(`Iteration on ${this.currentStep}`);
 
       const unreadMessages = this.userMessages;
       this.userMessages = [];
 
-      const action = this.actionGroup.actions[this.currentAction];
-
       const perception = `
-      Here is some additional context for your reference:
-      ${this.getContextAsString()}
-      ---
-      Latest messages:
-      ${unreadMessages.map((m) => m.content).join("\n")}
+        Here is some additional context for your reference:
+        ---
+        Agent Context:
+        ${this.getContextAsString()}
+        ---
+        These actions have been performed:
+        ${this.getActionHistoryAsString()}
+        ---
+        Latest messages:
+        ${unreadMessages.map((m) => m.content).join("\n")}
       `;
+
+      if (this.verbose) {
+        this.sendPrimaryChannelMessage(
+          `Agent Perception: \n${perception}`,
+          "log"
+        );
+      }
 
       const tools = this.model.modulesToTools(this.modulesAvailable());
 
-      const response = await this.model.getActionToPerformForDiscreteAction(
-        action,
+      const response = await this.model.getNextBestActionForTask(
+        this.task,
         tools,
         perception
       );
@@ -255,15 +278,15 @@ export class Agent {
       if (name === "usePrimaryChannel") {
         const message = parsedArgs.message;
         this.sendPrimaryChannelMessage(message);
-        this.currentAction += 1;
+        this.currentStep += 1;
         return this.agentProcess();
       }
 
       const output = await performAction(parsedArgs);
       this.actionHistory.push(
-        `For action "${action.defined}": Performed action "${name}" with arguments: ${args}`
+        `Performed action "${name}" with arguments: ${args}`
       );
-      this.addToContext(`${name}_${action.defined}`, output);
+      this.addToContext(`${name}`, output);
 
       if (this.verbose) {
         this.sendPrimaryChannelMessage(
@@ -274,7 +297,7 @@ export class Agent {
         );
       }
 
-      this.currentAction += 1;
+      this.currentStep += 1;
 
       return this.agentProcess();
     } catch (error) {

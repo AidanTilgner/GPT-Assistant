@@ -1,4 +1,3 @@
-import { format } from "prettier";
 import Assistant from "..";
 import { Channel } from "../../channels/construct";
 import { GlobalChannelMessage } from "../../types/main";
@@ -40,14 +39,14 @@ export class Pipeline {
       if (!this.assistant?.Model()) {
         return false;
       }
-      const discreteActions = await this.Assistant()
+      const agentsToDispatch = await this.Assistant()
         .Model()
-        .getDiscreteActions(messages[messages.length - 1].content);
+        .getAgentDispatchList(messages[messages.length - 1].content);
 
-      if (!discreteActions) {
+      if (!agentsToDispatch) {
         primaryChannel.sendMessageAsAssistant(
           {
-            content: "No discrete actions found.",
+            content: "No agents to dispatch.",
             type: "log",
           },
           conversationId
@@ -55,41 +54,17 @@ export class Pipeline {
         return false;
       }
 
-      if (this.verbose) {
-        primaryChannel.sendMessageAsAssistant(
-          {
-            content: "Picked discrete actions.",
-            type: "log",
-          },
-          conversationId
-        );
-        primaryChannel.sendMessageAsAssistant(
-          {
-            content: format(JSON.stringify(discreteActions, null, 2), {
-              parser: "json",
-            }),
-            type: "log",
-          },
-          conversationId
-        );
-      }
-
-      // TODO: Complete the action since it's not done yet
-      discreteActions.groups.forEach(async (group) => {
+      agentsToDispatch.agents.forEach(async (a) => {
         const agent = await this.Assistant()
           ?.AgentManager()
-          ?.dispatchAgentForActionGroup(group, primaryChannel, conversationId);
+          ?.dispatchAgent(a, primaryChannel, conversationId);
 
         if (this.verbose) {
-          console.info(
-            "Dispatched agent for action group: ",
-            group.name,
-            agent?.Name()
-          );
+          console.info("Dispatched agent for task: ", a.task, agent?.Name());
           primaryChannel.sendMessageAsAssistant(
             {
-              content: `Dispatched agent for action group: ${
-                group.name
+              content: `Dispatched agent for task: ${
+                a.task
               }, with name: "${agent?.Name()}"`,
               type: "log",
             },

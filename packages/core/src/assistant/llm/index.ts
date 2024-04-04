@@ -1,8 +1,7 @@
 /* eslint-disable no-unused-vars */
 import Assistant from "..";
 import {
-  DiscreteActionDerivedFromMessage,
-  DiscreteActionsGrouped,
+  AgentDispatchList,
   GlobalChannelMessage,
   Module,
   ModuleMethod,
@@ -46,12 +45,12 @@ export abstract class ChatModel<Tool = unknown> {
     options: { label: string; value: T }[]
   ): Promise<{ decision: T; reason: string } | undefined>;
 
-  public abstract getDiscreteActions(
+  public abstract getAgentDispatchList(
     prompt: string
-  ): Promise<DiscreteActionsGrouped | undefined>;
+  ): Promise<AgentDispatchList | undefined>;
 
-  public abstract getActionToPerformForDiscreteAction(
-    discreteAction: DiscreteActionDerivedFromMessage,
+  public abstract getNextBestActionForTask(
+    task: string,
     tools: Tool[],
     additionalInfo: string
   ): Promise<

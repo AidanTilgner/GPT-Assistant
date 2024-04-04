@@ -1,5 +1,5 @@
 import Assistant from "..";
-import { DiscreteActionGroup, GlobalChannelMessage } from "../../types/main";
+import { AgentToDispatch, GlobalChannelMessage } from "../../types/main";
 import { Agent } from "./agent";
 import { ChatModel } from "../llm";
 import { Channel } from "../../channels/construct";
@@ -89,8 +89,8 @@ export class AgentManager {
     }
   }
 
-  public async dispatchAgentForActionGroup(
-    actionGroup: DiscreteActionGroup,
+  public async dispatchAgent(
+    agent: AgentToDispatch,
     primaryChannel: Channel,
     primaryConversationId: string
   ) {
@@ -99,21 +99,21 @@ export class AgentManager {
         return undefined;
       }
       const name = Agent.getRandomNewName();
-      const agent = new Agent({
+      const a = new Agent({
         name,
         model: this.Assistant()?.Model() as ChatModel,
         primaryChannel,
-        actionGroup,
+        task: agent.task,
         primaryConversationId,
         verbose: this.verbose,
       });
 
-      this.registerAgent(agent);
-      this.initAndStartAgent(agent.Name());
+      this.registerAgent(a);
+      this.initAndStartAgent(a.Name());
 
-      return agent;
-    } catch (err) {
-      console.error(err);
+      return a;
+    } catch (error) {
+      console.error(error);
       return undefined;
     }
   }
