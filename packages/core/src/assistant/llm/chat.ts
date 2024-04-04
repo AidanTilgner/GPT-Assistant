@@ -10,7 +10,10 @@ import {
 export type AllowedOpenAIChatModels =
   OpenAI.ChatCompletionCreateParams["model"];
 
-export type Tool = OpenAI.ChatCompletionTool & { method: ModuleMethod };
+export type Tool = OpenAI.ChatCompletionTool & {
+  method: ModuleMethod;
+  module: Module;
+};
 
 export interface OpenAIOptions {
   apiKey: string;
@@ -63,6 +66,7 @@ export class OpenAIChatModel extends ChatModel<Tool> {
               method.parameters as OpenAI.ChatCompletionTool["function"]["parameters"],
           },
           method,
+          module: m,
         });
       });
     });
@@ -343,6 +347,7 @@ export class OpenAIChatModel extends ChatModel<Tool> {
             # Rules
             - Dispatch as efficiently as possible.
             - Some steps in tasks depend on eachother, keep this in mind.
+            - Always provide all necessary information in the task description.
             `,
           },
           {
@@ -416,7 +421,9 @@ export class OpenAIChatModel extends ChatModel<Tool> {
     task: string,
     tools: Tool[],
     additionalInfo: string
-  ): Promise<(ModuleMethod & { arguments: string }) | undefined> {
+  ): Promise<
+    (ModuleMethod & { arguments: string; module_name: string }) | undefined
+  > {
     try {
       const response = await this.client.chat.completions.create({
         model: this.PlanningModel(),
@@ -433,8 +440,7 @@ export class OpenAIChatModel extends ChatModel<Tool> {
             If the action history indicates that the task has been accomplished, mark it as complete.
 
             RULES: 
-            - Always use tools
-            - Mark complete as soon as the task has been accomplished
+            - Send the user a final message before marking complete.
             `,
           },
           {
@@ -483,7 +489,8 @@ export class OpenAIChatModel extends ChatModel<Tool> {
               required: ["message"],
             },
             performAction: () => {},
-          } satisfies ModuleMethod & { arguments: string };
+            module_name: "agentService",
+          } satisfies ModuleMethod & { arguments: string; module_name: string };
         }
         return undefined;
       }
@@ -507,6 +514,7 @@ export class OpenAIChatModel extends ChatModel<Tool> {
       return {
         ...foundMethod.method,
         arguments: JSON.stringify(parsedArgs),
+        module_name: foundMethod.module.name,
       };
     } catch (error) {
       console.error(error);

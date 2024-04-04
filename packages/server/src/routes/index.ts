@@ -1,4 +1,4 @@
-import Assistant from "@quasarbrains/assistant";
+import Assistant, { GlobalChannelMessage } from "@quasarbrains/assistant";
 import { Request, Router } from "express";
 import Server from "..";
 
@@ -15,15 +15,19 @@ const getBodyFeatures = (req: Request) => {
 router.get("/", (req, res) => {
   const { assistant } = getBodyFeatures(req);
   res.send({
-    message: "Welcome to the GPT Assistant server! My name is " + assistant.Name() + ".",
+    message:
+      "Welcome to the GPT Assistant server! My name is " +
+      assistant.Name() +
+      ".",
   });
 });
 
 router.post("/message", async (req, res) => {
   try {
     const { serverChannel } = getBodyFeatures(req);
-    const message = req.body.message as string;
-    const conversation_id = req.body.conversation_id || req.query.conversation_id;
+    const message = req.body.message || (req.query.message as string);
+    const agentId = req.body.agent || (req.query.agent as string);
+    const conversationId = req.body.conversationId || req.query.conversationId;
 
     if (!message) {
       return res.status(400).send({
@@ -31,9 +35,10 @@ router.post("/message", async (req, res) => {
       });
     }
 
-    if (!conversation_id) {
+    if (!conversationId) {
       return res.status(400).send({
-        message: "No conversation_id provided. Add conversation_id to the query string or body.",
+        message:
+          "No conversation_id provided. Add conversation_id to the query string or body.",
       });
     }
 
@@ -41,8 +46,9 @@ router.post("/message", async (req, res) => {
       message: {
         role: "user",
         content: message,
-      },
-      conversation_id,
+        agent: agentId,
+      } satisfies GlobalChannelMessage,
+      conversationId: conversationId,
     });
 
     if (!started) {
@@ -65,7 +71,8 @@ router.post("/message", async (req, res) => {
 router.get("/history", (req, res) => {
   try {
     const { serverChannel } = getBodyFeatures(req);
-    const conversation_id = req.body.conversation_id || req.query.conversation_id;
+    const conversation_id =
+      req.body.conversation_id || req.query.conversation_id;
     if (conversation_id) {
       const history = serverChannel.getConversationHistory(conversation_id);
       return res.send({

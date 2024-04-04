@@ -75,13 +75,12 @@ export class AgentManager {
     }
   }
 
-  public recieveAgentMessage(message: GlobalChannelMessage) {
+  public recieveAgentMessage(agentId: string, conversationId: string) {
     try {
-      const messageAgent = message.agent;
-      if (!messageAgent || !this.agents[messageAgent]) {
+      if (!agentId || !this.agents[agentId]) {
         return false;
       }
-      this.agents[messageAgent].recieveMessage();
+      this.agents[agentId].recieveMessage(conversationId);
       return true;
     } catch (error) {
       console.error(error);

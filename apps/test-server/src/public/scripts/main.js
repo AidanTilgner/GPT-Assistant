@@ -10,7 +10,8 @@ const getRandomID = () => {
   return Math.random().toString(36).substr(2, 9);
 };
 
-window.conversation_id = sessionStorage.getItem("conversation_id") || getRandomID();
+window.conversation_id =
+  sessionStorage.getItem("conversation_id") || getRandomID();
 
 sessionStorage.setItem("conversation_id", window.conversation_id);
 
@@ -62,16 +63,21 @@ CHATFORM.addEventListener("submit", (e) => {
     // match agent id in #agent_id
     agentId = MESSAGE.match(/#(\w+)/)[1];
   }
+
+  const body = JSON.stringify({
+    message: MESSAGE,
+    conversationId: window.conversation_id,
+    agent: agentId,
+  });
+
+  console.log("Sending body: ", body);
+
   fetch("/assistant/message", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      message: MESSAGE,
-      conversation_id: window.conversation_id,
-      agent: agentId,
-    }),
+    body,
   });
 });
 
@@ -87,12 +93,15 @@ window.socket.on("assistant-message", (message) => {
 
 // * FETCH CONVERSATION HISTORY
 (async () => {
-  const response = await fetch(`/assistant/history?conversation_id=${window.conversation_id}`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
+  const response = await fetch(
+    `/assistant/history?conversation_id=${window.conversation_id}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
   const data = await response.json();
   chatHistory.push(...data.data);
   renderChatHistory();

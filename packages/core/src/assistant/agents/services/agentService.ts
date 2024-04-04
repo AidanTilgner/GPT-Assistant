@@ -115,7 +115,9 @@ export default class AgentService extends Service {
   }
 
   public promptUser({ message }: { message: string }) {
-    console.log("PROMPTING USER: ", message);
-    return `User responded "TEST TEST TEST" to message "${message}"`;
+    if (!message || typeof message != "string") {
+      return "Message sent by agent was invalid.";
+    }
+    return this.agent.promptUser(message);
   }
 }

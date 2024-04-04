@@ -56,6 +56,7 @@ export abstract class ChatModel<Tool = unknown> {
   ): Promise<
     | (ModuleMethod & {
         arguments: string;
+        module_name: string;
       })
     | undefined
   >;

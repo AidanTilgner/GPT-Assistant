@@ -6,15 +6,15 @@ export interface ChannelOptions {
   name: string;
   description: string;
   init: () => void;
-  sendMessage: (message: GlobalChannelMessage, conversation_id: string) => void;
+  sendMessage: (message: GlobalChannelMessage, conversationId: string) => void;
   defineConversationHistory: (history: {
-    conversation_id: string;
+    conversationId: string;
     messages: GlobalChannelMessage[];
   }) => void;
   addToHistory: (history: Record<string, GlobalChannelMessage[]>) => void;
   getFullHistory: () => Record<string, GlobalChannelMessage[]>;
   getConversationHistory: (
-    conversation_id: string,
+    conversationId: string,
     count?: number
   ) => GlobalChannelMessage[];
 }
@@ -27,23 +27,23 @@ export class Channel {
       message: GlobalChannelMessage,
       sendMessage: (
         message: GlobalChannelMessage,
-        conversation_id: string
+        conversationId: string
       ) => void
     ) => void
   > = [];
   private manager: ChannelManager | undefined;
   private sendMessage: (
     message: GlobalChannelMessage,
-    conversation_id: string
+    conversationId: string
   ) => void;
   public init: () => void;
   public defineConversationHistory: (history: {
-    conversation_id: string;
+    conversationId: string;
     messages: GlobalChannelMessage[];
   }) => void;
   public getFullHistory: () => Record<string, GlobalChannelMessage[]>;
   public getConversationHistory: (
-    conversation_id: string,
+    conversationId: string,
     count?: number
   ) => GlobalChannelMessage[];
 
@@ -86,7 +86,7 @@ export class Channel {
           parameters: {
             type: "object",
             properties: {
-              conversation_id: {
+              conversationId: {
                 type: "string",
                 description: "The conversation id.",
               },
@@ -95,13 +95,10 @@ export class Channel {
                 description: "The number of messages to return.",
               },
             },
-            required: ["conversation_id"],
+            required: ["conversationId"],
           },
-          performAction: (params: {
-            conversation_id: string;
-            count?: number;
-          }) =>
-            this.getConversationHistory(params.conversation_id, params.count),
+          performAction: (params: { conversationId: string; count?: number }) =>
+            this.getConversationHistory(params.conversationId, params.count),
         },
         {
           name: "getFullHistory",
@@ -158,10 +155,10 @@ export class Channel {
   public getActionsMap() {
     return {
       get_conversation_history: ({
-        conversation_id,
+        conversationId,
         count,
       }: {
-        conversation_id: string;
+        conversationId: string;
         count?: number;
       }) => this.getConversationHistory,
       get_full_history: this.getFullHistory,
@@ -171,29 +168,29 @@ export class Channel {
 
   public async recieveMessage(
     message: GlobalChannelMessage,
-    conversation_id: string
+    conversationId: string
   ): Promise<void> {
     this.defineConversationHistory({
-      conversation_id,
-      messages: [...this.getConversationHistory(conversation_id), message],
+      conversationId,
+      messages: [...this.getConversationHistory(conversationId), message],
     });
     this.messageListeners.forEach((cb) =>
       cb(message, (msg: GlobalChannelMessage) =>
-        this.sendMessage(msg, conversation_id)
+        this.sendMessage(msg, conversationId)
       )
     );
   }
 
   public async sendMessageAsAssistant(
     message: Omit<GlobalChannelMessage, "role">,
-    conversation_id: string
+    conversationId: string
   ): Promise<void> {
     const newMessage = {
       ...message,
       role: "assistant" as const,
     };
-    this.recieveMessage(newMessage, conversation_id);
-    return this.sendMessage(newMessage, conversation_id);
+    this.recieveMessage(newMessage, conversationId);
+    return this.sendMessage(newMessage, conversationId);
   }
 
   public addMessageListener(
@@ -201,7 +198,7 @@ export class Channel {
       message: GlobalChannelMessage,
       sendMessage: (
         message: GlobalChannelMessage,
-        conversation_id: string
+        conversationId: string
       ) => void
     ) => void
   ): void {
@@ -217,18 +214,18 @@ export class Channel {
    */
   public async startAssistantResponse({
     message,
-    conversation_id,
+    conversationId,
   }: {
     message: GlobalChannelMessage;
-    conversation_id: string;
+    conversationId: string;
   }): Promise<boolean> {
     try {
-      this.recieveMessage(message, conversation_id);
-      const history = this.getConversationHistory(conversation_id);
+      this.recieveMessage(message, conversationId);
+      const history = this.getConversationHistory(conversationId);
       const response = await this.manager?.Assistant()?.startAssistantResponse({
         messages: [...history],
         channel: this,
-        conversation_id,
+        conversationId,
       });
 
       return !!response;
@@ -238,8 +235,8 @@ export class Channel {
     }
   }
 
-  public getAgentHistory(agentName: string, conversation_id: string) {
-    const history = this.getConversationHistory(conversation_id);
+  public getAgentHistory(agentName: string, conversationId: string) {
+    const history = this.getConversationHistory(conversationId);
     const filteredHistory = history.filter(
       (message) => message.agent === agentName
     );

@@ -128,7 +128,7 @@ export default class Server {
       },
       defineConversationHistory: (history) => {
         this.defineConversationHistory(
-          history.conversation_id,
+          history.conversationId,
           history.messages
         );
       },
