@@ -1,6 +1,6 @@
 import { AgentManager } from ".";
 import { Channel, Service } from "..";
-import { DiscreteActionGroup, Module } from "../../types/main";
+import { Module } from "../../types/main";
 import { ChatModel } from "../llm";
 import { randomBytes } from "crypto";
 import { GlobalChannelMessage } from "../../types/main";
@@ -11,7 +11,7 @@ export interface AgentOptions {
   model: ChatModel;
   primaryChannel: Channel;
   primaryConversationId: string;
-  actionGroup: DiscreteActionGroup;
+  task: string;
   verbose?: boolean;
 }
 
@@ -24,12 +24,13 @@ export class Agent {
   private verbose: boolean;
   private agentContext: { [key: string]: string } = {};
   private agentService: Service;
-  private actionGroup: DiscreteActionGroup;
-  private currentAction: number = 0;
+  private task: string;
+  private currentStep: number = 0;
   private userMessages: GlobalChannelMessage[] = [];
   private actionHistory: string[] = [];
   private paused: boolean = false;
-  private done: boolean = false;
+  private awaitingUserMessage: boolean = false;
+  private complete: boolean = false;
 
   constructor({
     name,
@@ -37,14 +38,14 @@ export class Agent {
     primaryChannel,
     primaryConversationId,
     verbose,
-    actionGroup,
+    task,
   }: AgentOptions) {
     this.name = name;
     this.model = model;
     this.primaryChannel = primaryChannel;
     this.primaryConversationId = primaryConversationId;
+    this.task = task;
     this.verbose = verbose ?? false;
-    this.actionGroup = actionGroup;
     this.agentService = new AgentService({ agent: this });
     this.userMessages = [];
   }
@@ -69,12 +70,31 @@ export class Agent {
     return this.primaryChannel;
   }
 
-  public getAgentConversationHistory() {
+  public MarkComplete() {
+    this.complete = true;
+  }
+
+  public MarkPaused() {
+    this.paused = true;
+  }
+
+  public getAgentConversationHistory(conversationId: string) {
+    const history = this.primaryChannel.getAgentHistory(
+      this.Name(),
+      conversationId
+    );
+    return history;
+  }
+
+  public getAgentConversationHistoryAsString() {
     const history = this.primaryChannel.getAgentHistory(
       this.Name(),
       this.primaryConversationId
     );
-    return history;
+    const str = history.reduce((acc, curr) => {
+      return (acc += `- ${curr.role}: ${curr.content}\n"`);
+    }, "");
+    return str;
   }
 
   public registerManager(manager: AgentManager) {
@@ -108,16 +128,14 @@ export class Agent {
       },
     ];
 
-    return [...services, ...channels, ...others];
-  }
+    const modules = [...services, ...channels, ...others];
 
-  public modulesMap(): { [key: string]: Module } {
-    const modules = this.modulesAvailable();
-    const map: { [key: string]: Module } = {};
-    modules.forEach((m) => {
-      map[m.name] = m;
-    });
-    return map;
+    const withUniqueNames = modules.map((m) => ({
+      ...m,
+      name: `${m.name}(${randomBytes(4).toString("hex")})`,
+    }));
+
+    return withUniqueNames;
   }
 
   public init(options?: { generate_name?: boolean }) {
@@ -129,6 +147,10 @@ export class Agent {
 
   public start() {
     this.sendGreetingMessage();
+    this.agentProcess();
+  }
+
+  public restart() {
     this.agentProcess();
   }
 
@@ -151,14 +173,30 @@ export class Agent {
     }
   }
 
-  public async recieveMessage() {
+  public async recieveMessage(conversationId: string) {
     try {
-      const history = this.getAgentConversationHistory();
+      const history = this.getAgentConversationHistory(conversationId);
 
-      this.userMessages.push(history[history.length - 1]);
+      const lastMessage = history[history.length - 1];
+
+      this.userMessages.push(lastMessage);
+      if (this.awaitingUserMessage) {
+        this.awaitingUserMessage = false;
+        this.restart();
+      }
     } catch (error) {
       console.error(error);
       return false;
+    }
+  }
+
+  public async promptUser(message: string) {
+    try {
+      this.awaitingUserMessage = true;
+      this.sendPrimaryChannelMessage(message);
+    } catch (error) {
+      console.error(error);
+      return undefined;
     }
   }
 
@@ -166,7 +204,7 @@ export class Agent {
     try {
       await this.sendPrimaryChannelMessage(
         `${this.FormattedAgentName()} has been initialized to complete the following task:
-        "${JSON.stringify(this.actionGroup)}"
+        "${JSON.stringify(this.task)}"
         `,
         "log"
       );
@@ -189,8 +227,16 @@ export class Agent {
     return str;
   }
 
+  public getActionHistoryAsString() {
+    const str = this.actionHistory.reduce((acc, curr) => {
+      return (acc += curr + "\n");
+    }, "");
+
+    return str;
+  }
+
   public finish() {
-    this.done = true;
+    this.complete = true;
     if (this.verbose) {
       this.sendPrimaryChannelMessage(
         `${this.FormattedAgentName()} has finished.`,
@@ -205,41 +251,73 @@ export class Agent {
 
   public async agentProcess(): Promise<boolean> {
     try {
-      if (!this.actionGroup) {
-        console.error("No action group.");
+      if (!this.task) {
+        console.error("No task provided.");
         return false;
+      }
+
+      if (this.complete) {
+        return true;
       }
 
       if (this.paused) {
         return false;
       }
 
-      if (this.done) {
-        return true;
-      }
-
-      if (this.currentAction >= this.actionGroup.actions.length) {
-        this.finish();
-        return true;
+      if (this.awaitingUserMessage) {
+        return false;
       }
 
       const unreadMessages = this.userMessages;
       this.userMessages = [];
 
-      const action = this.actionGroup.actions[this.currentAction];
-
       const perception = `
-      Here is some additional context for your reference:
-      ${this.getContextAsString()}
-      ---
-      Latest messages:
-      ${unreadMessages.map((m) => m.content).join("\n")}
+        Here is some additional context for your reference:
+        ---
+        Agent Context:
+        ${this.getContextAsString() || "No context yet."}
+        ---
+        These actions have been performed:
+        ${
+          this.getActionHistoryAsString() ||
+          "No actions have been performed yet."
+        }
+        ---
+        Message History:
+        ${this.getAgentConversationHistoryAsString()}
+        ---
+        Unread messages:
+        ${
+          unreadMessages.length > 0
+            ? unreadMessages.map((m) => m.content).join("\n")
+            : "There are no unread messages."
+        }
       `;
+
+      if (this.verbose) {
+        this.sendPrimaryChannelMessage(
+          `Agent Perception: \n${perception}`,
+          "log"
+        );
+      }
 
       const tools = this.model.modulesToTools(this.modulesAvailable());
 
-      const response = await this.model.getActionToPerformForDiscreteAction(
-        action,
+      if (this.verbose) {
+        this.sendPrimaryChannelMessage(
+          `These tools have been provided to the agent:\n${this.modulesAvailable().map(
+            (m) => {
+              return m.schema.methods.reduce((acc, curr) => {
+                return (acc += `- ${curr.name}: ${curr.description}\n`);
+              }, "");
+            }
+          )}`,
+          "log"
+        );
+      }
+
+      const response = await this.model.getNextBestActionForTask(
+        this.task,
         tools,
         perception
       );
@@ -249,32 +327,41 @@ export class Agent {
         return false;
       }
 
-      const { performAction, arguments: args, name } = response;
+      const { performAction, arguments: args, name, module_name } = response;
       const parsedArgs = { ...JSON.parse(args), agent: this.Name() };
+      const namedAction = `${module_name}.${name}`;
+
+      if (this.verbose) {
+        this.sendPrimaryChannelMessage(
+          `Selected "${namedAction}" as action`,
+          "log"
+        );
+      }
 
       if (name === "usePrimaryChannel") {
         const message = parsedArgs.message;
         this.sendPrimaryChannelMessage(message);
-        this.currentAction += 1;
+        this.currentStep += 1;
         return this.agentProcess();
       }
 
       const output = await performAction(parsedArgs);
+      const contextKey = `${this.currentStep}-${namedAction}`;
       this.actionHistory.push(
-        `For action "${action.defined}": Performed action "${name}" with arguments: ${args}`
+        `Performed action "${namedAction}" with arguments: ${args} and context key ${contextKey}.`
       );
-      this.addToContext(`${name}_${action.defined}`, output);
+      this.addToContext(contextKey, output);
 
       if (this.verbose) {
         this.sendPrimaryChannelMessage(
-          `Performed action ${name} with arguments ${JSON.stringify(
+          `Performed action ${namedAction} with arguments ${JSON.stringify(
             args
           )} and output: ${output}`,
           "log"
         );
       }
 
-      this.currentAction += 1;
+      this.currentStep += 1;
 
       return this.agentProcess();
     } catch (error) {

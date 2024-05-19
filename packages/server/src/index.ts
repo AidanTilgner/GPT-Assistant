@@ -1,5 +1,8 @@
 import Express, { Router } from "express";
-import Assistant, { Channel, GlobalChannelMessage } from "@quasarbrains/assistant";
+import Assistant, {
+  Channel,
+  GlobalChannelMessage,
+} from "@quasarbrains/assistant";
 import routes from "./routes";
 import axios from "axios";
 
@@ -124,7 +127,10 @@ export default class Server {
         return this.serverHistory;
       },
       defineConversationHistory: (history) => {
-        this.defineConversationHistory(history.conversation_id, history.messages);
+        this.defineConversationHistory(
+          history.conversationId,
+          history.messages
+        );
       },
       getConversationHistory: (conversation_id, count) => {
         return this.getConversationHistory(conversation_id, count);

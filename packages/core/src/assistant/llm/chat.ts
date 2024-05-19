@@ -1,8 +1,7 @@
 import OpenAI from "openai";
 import { ChatModel } from ".";
 import {
-  DiscreteActionDerivedFromMessage,
-  DiscreteActionsGrouped,
+  AgentDispatchList,
   GlobalChannelMessage,
   Module,
   ModuleMethod,
@@ -11,7 +10,10 @@ import {
 export type AllowedOpenAIChatModels =
   OpenAI.ChatCompletionCreateParams["model"];
 
-export type Tool = OpenAI.ChatCompletionTool & { method: ModuleMethod };
+export type Tool = OpenAI.ChatCompletionTool & {
+  method: ModuleMethod;
+  module: Module;
+};
 
 export interface OpenAIOptions {
   apiKey: string;
@@ -64,6 +66,7 @@ export class OpenAIChatModel extends ChatModel<Tool> {
               method.parameters as OpenAI.ChatCompletionTool["function"]["parameters"],
           },
           method,
+          module: m,
         });
       });
     });
@@ -321,9 +324,9 @@ export class OpenAIChatModel extends ChatModel<Tool> {
     }
   }
 
-  public async getDiscreteActions(
+  public async getAgentDispatchList(
     prompt: string
-  ): Promise<DiscreteActionsGrouped | undefined> {
+  ): Promise<AgentDispatchList | undefined> {
     try {
       const response = await this.client.chat.completions.create({
         model: this.PlanningModel(),
@@ -332,19 +335,19 @@ export class OpenAIChatModel extends ChatModel<Tool> {
             role: "system",
             content: `
             # Purpose
-            You are a discrete action extractor, and your role is to take user input and transform it into a structured format.
+            Based on the prompt given to you, you're tasked with dispatching agents to respond as effeciently as possible.
 
             # Context
-            A group is an ordered set of discrete actions, which upon completion will fulfill a request.
-            A discrete action is the smallest indivisible unit of action within a group.
-            Even if the user input does not contain an explicit request, you should still define an action to be performed in response.
-            Think of groups as being sets of dependent actions, so independent actions should be in different groups.
-            Each group will be given to an individual agent for completion, so only define as many groups as agents which should be dispatched.
+            An agent is capable of performing a task using tools and its own context.
+            You can dispatch as many agents as required to respond optimally to the prompt.
+            However, you should attempt to be efficient in dispatch, balancing parallelism with speed.
+            Keep in mind that agents can't collaborate, so a task given to an agent needs to be able to be accomplished by that agent alone.
+            Each task you delegate will dispatch an individual agent.
 
             # Rules
-            - Be conservative in the number of groups you define, but always define as many as necessary.
-            - Define as many actions per group as necessary to fully complete the request.
-            - Do not take initiative, only extract actions directly in the prompt.
+            - Dispatch as efficiently as possible.
+            - Some steps in tasks depend on eachother, keep this in mind.
+            - Always provide all necessary information in the task description.
             `,
           },
           {
@@ -355,53 +358,33 @@ export class OpenAIChatModel extends ChatModel<Tool> {
         tool_choice: {
           type: "function",
           function: {
-            name: "extractDiscreteActions",
+            name: "dispatchAgents",
           },
         },
         tools: [
           {
             type: "function",
             function: {
-              name: "extractDiscreteActions",
+              name: "dispatchAgents",
               parameters: {
                 type: "object",
                 properties: {
-                  groups: {
+                  agents: {
                     type: "array",
+                    description: "The agents to be delegated.",
                     items: {
                       type: "object",
                       properties: {
-                        name: {
+                        task: {
                           type: "string",
-                          description:
-                            "A name which describes the action group.",
-                        },
-                        actions: {
-                          type: "array",
-                          items: {
-                            type: "object",
-                            description: "The discrete action to be performed.",
-                            properties: {
-                              defined: {
-                                type: "string",
-                                description:
-                                  "The description of the discrete action.",
-                              },
-                              source_text: {
-                                type: "string",
-                                description:
-                                  "The part of the prompt that led to this action being described.",
-                              },
-                            },
-                          },
+                          description: "The task for this agent to complete.",
                         },
                       },
-                      required: ["name", "actions"],
+                      required: ["task"],
                     },
-                    description: "The groups of actions to be performed.",
                   },
                 },
-                required: ["groups"],
+                required: ["agents"],
               },
             },
           },
@@ -427,18 +410,20 @@ export class OpenAIChatModel extends ChatModel<Tool> {
       }
 
       const parsedArgs = JSON.parse(args);
-      return parsedArgs as DiscreteActionsGrouped;
+      return parsedArgs as AgentDispatchList;
     } catch (error) {
       console.error(error);
       return undefined;
     }
   }
 
-  public async getActionToPerformForDiscreteAction(
-    discreteAction: DiscreteActionDerivedFromMessage,
+  public async getNextBestActionForTask(
+    task: string,
     tools: Tool[],
     additionalInfo: string
-  ): Promise<(ModuleMethod & { arguments: string }) | undefined> {
+  ): Promise<
+    (ModuleMethod & { arguments: string; module_name: string }) | undefined
+  > {
     try {
       const response = await this.client.chat.completions.create({
         model: this.PlanningModel(),
@@ -446,18 +431,25 @@ export class OpenAIChatModel extends ChatModel<Tool> {
           {
             role: "system",
             content: `
+            # Purpose
+            You are an agent attempting to perform a task.
+            Given a task, as well as additional information such as previous actions and context
+            your goal is to take the next best action to complete the task.
             Given a description of an action to take, you should select the best tool to perform the action.
-            If no tool is suitable for the action, use a channel to notify the user.
+            If no tool is suitable for the action, you should ask for clarification from the user.
+            If the action history indicates that the task has been accomplished, mark it as complete.
 
-            RULES:
-            - Always use tools
+            RULES: 
+            - Send the user a final message before marking complete.
             `,
           },
           {
             role: "user",
             content: `
-            Here is the discrete action to be performed:
-            ${discreteAction.defined}
+            The task is as follows:
+            ---
+            ${task}
+            ---
             `,
           },
           {
@@ -497,7 +489,8 @@ export class OpenAIChatModel extends ChatModel<Tool> {
               required: ["message"],
             },
             performAction: () => {},
-          } satisfies ModuleMethod & { arguments: string };
+            module_name: "agentService",
+          } satisfies ModuleMethod & { arguments: string; module_name: string };
         }
         return undefined;
       }
@@ -521,6 +514,7 @@ export class OpenAIChatModel extends ChatModel<Tool> {
       return {
         ...foundMethod.method,
         arguments: JSON.stringify(parsedArgs),
+        module_name: foundMethod.module.name,
       };
     } catch (error) {
       console.error(error);

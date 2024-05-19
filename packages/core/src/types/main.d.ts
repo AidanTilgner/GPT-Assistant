@@ -32,19 +32,10 @@ export interface Module {
 
 export type ModuleList = Module[];
 
-export type DiscreteActionGroup = {
-  name: string;
-  actions: DiscreteActionDerivedFromMessage[];
+export type AgentToDispatch = {
+  task: string;
 };
 
-export type DiscreteActionsGrouped = {
-  groups: DiscreteActionGroup[];
-};
-
-export interface DiscreteAction {
-  defined: string;
-}
-
-export type DiscreteActionDerivedFromMessage = DiscreteAction & {
-  source_text: string;
+export type AgentDispatchList = {
+  agents: AgentToDispatch[];
 };

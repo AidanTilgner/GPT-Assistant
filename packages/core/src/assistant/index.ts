@@ -168,25 +168,28 @@ export default class Assistant {
   public async startAssistantResponse({
     messages,
     channel,
-    conversation_id,
+    conversationId,
   }: {
     messages: GlobalChannelMessage[];
     channel: Channel;
-    conversation_id: string;
+    conversationId: string;
   }): Promise<boolean> {
     try {
+      const lastMessage = messages[messages.length - 1];
       if (
-        this.agentManager.messageBelongsToAgent(messages[messages.length - 1])
+        this.agentManager.messageBelongsToAgent(lastMessage) &&
+        lastMessage.agent
       ) {
         return this.agentManager.recieveAgentMessage(
-          messages[messages.length - 1]
+          lastMessage.agent,
+          conversationId
         );
       }
 
       const pipelineResponse = await this.pipeline.userMessage({
         messages,
         primaryChannel: channel,
-        conversationId: conversation_id,
+        conversationId: conversationId,
       });
 
       return pipelineResponse;
